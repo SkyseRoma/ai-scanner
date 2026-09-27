@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+data/database/*
+!data/database/.gitkeep
+data/output.wav
+*.mp3
+*.wav
+.vscode/
+*.log
+Hardware/
+Backups/
