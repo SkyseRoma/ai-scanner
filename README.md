@@ -5,11 +5,126 @@
 ## Архитектура
 
 ```
-Камера (OV5647) → rpicam-vid → MJPEG → ILI9341 (дисплей, live-трансляция)
+Камера (OV5647) → picamera2 → ILI9341 (дисплей, live-трансляция)
                      │
-                     └─ Кнопка → JPEG → Ollama (qwen3.5:0.8b) → текст → MAX98357A (звук)
-                                                            └─ сохраняется в modules/database/<timestamp>/
+                     └─ Кнопка → JPEG → Ollama (qwen3.5:0.8b) → текст → BT/I2S (звук)
+                                                            └─ сохраняется в data/database/<timestamp>/
 ```
+
+## Установка на чистую систему
+
+### 1. Raspberry Pi OS Lite (64-bit)
+
+Установите Raspberry Pi OS Lite через [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
+- **OS**: Raspberry Pi OS Lite (64-bit) — без рабочего стола
+- **SSH**: включить
+- **Wi-Fi**: указать если нет Ethernet
+- **Hostname**: `scanner`
+
+### 2. Подключение
+
+```bash
+ssh pi@scanner.local
+```
+
+### 3. Базовая настройка
+
+```bash
+# Обновление системы
+sudo apt update && sudo apt upgrade -y
+
+# Включение SPI и I2C
+sudo raspi-config nonint do_spi 0
+sudo raspi-config nonint do_i2c 0
+
+# Перезагрузка
+sudo reboot
+```
+
+### 4. Установка зависимостей
+
+```bash
+# Системные пакеты
+sudo apt install -y python3-pip python3-dev libcamera-dev python3-libcamera \
+    rpicam-apps libportaudio2 portaudio19-dev git i2c-tools spi-tools \
+    libopenblas-dev liblapack-dev cmake build-essential libcap-dev \
+    pulseaudio pulseaudio-module-bluetooth bluetooth bluez libspa-0.2-bluetooth
+
+# Python пакеты
+pip install --break-system-packages picamera2 numpy opencv-python RPi.GPIO \
+    rpi-lgpio spidev requests pillow omegaconf pyyaml soundfile
+```
+
+### 5. Установка Ollama и моделей
+
+```bash
+# Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Модели
+ollama pull qwen3.5:0.8b      # быстрая (1GB)
+ollama pull qwen2.5vl:3b      # умная (3.2GB)
+```
+
+### 6. Клонирование проекта
+
+```bash
+cd ~
+mkdir -p PROJECTS
+git clone https://github.com/SkyseRoma/scanner.git PROJECTS/scanner
+```
+
+### 7. Настройка Bluetooth аудио (опционально)
+
+```bash
+# В rc.local для автоподключения
+sudo tee /etc/rc.local << 'EOF'
+#!/bin/bash
+pkill -9 -f pipewire 2>/dev/null
+pkill -9 -f wireplumber 2>/dev/null
+pulseaudio --system --daemonize --disallow-exit
+sleep 3
+echo -e 'connect XX:XX:XX:XX:XX:XX\nquit' | bluetoothctl
+sleep 2
+pactl set-default-sink bluez_sink.XX_XX_XX_XX_XX_XX.a2dp_sink 2>/dev/null
+exit 0
+EOF
+sudo chmod +x /etc/rc.local
+```
+
+### 8. Автозапуск
+
+```bash
+# Ollama сервис (создаётся автоматически при установке)
+sudo systemctl enable ollama
+
+# Scanner сервис
+sudo tee /etc/systemd/system/scanner.service << 'EOF'
+[Unit]
+Description=Subnautica Scanner
+After=network.target ollama.service
+Requires=ollama.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/PROJECTS/scanner
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable scanner
+sudo systemctl start scanner
+```
+
+### 9. Проверка
+
+Откройте в браузере: `http://scanner.local:8080`
 
 ## Железо
 

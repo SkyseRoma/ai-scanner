@@ -7,9 +7,110 @@ Subnautica扫描仪外壳中的自主AI设备。从摄像头捕获图像，通�
 ```
 摄像头 (OV5647) → picamera2 → ILI9341 (显示屏, 实时预览)
                      │
-                     └─ 按钮 → JPEG → Ollama (qwen3.5:0.8b) → 文本 → MAX98357A (音频)
+                     └─ 按钮 → JPEG → Ollama (qwen3.5:0.8b) → 文本 → BT/I2S (音频)
                                                               └─ 保存到 data/database/<timestamp>/
 ```
+
+## 全新系统安装
+
+### 1. Raspberry Pi OS Lite (64-bit)
+
+使用 [Raspberry Pi Imager](https://www.raspberrypi.com/software/) 刷入 Raspberry Pi OS Lite：
+- **OS**: Raspberry Pi OS Lite (64-bit) — 无桌面环境
+- **SSH**: 启用
+- **Wi-Fi**: 如无以太网则配置
+- **Hostname**: `scanner`
+
+### 2. 连接
+
+```bash
+ssh pi@scanner.local
+```
+
+### 3. 基本设置
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo raspi-config nonint do_spi 0
+sudo raspi-config nonint do_i2c 0
+sudo reboot
+```
+
+### 4. 安装依赖
+
+```bash
+sudo apt install -y python3-pip python3-dev libcamera-dev python3-libcamera \
+    rpicam-apps libportaudio2 portaudio19-dev git i2c-tools spi-tools \
+    libopenblas-dev liblapack-dev cmake build-essential libcap-dev \
+    pulseaudio pulseaudio-module-bluetooth bluetooth bluez libspa-0.2-bluetooth
+
+pip install --break-system-packages picamera2 numpy opencv-python RPi.GPIO \
+    rpi-lgpio spidev requests pillow omegaconf pyyaml soundfile
+```
+
+### 5. 安装 Ollama 和模型
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3.5:0.8b
+ollama pull qwen2.5vl:3b
+```
+
+### 6. 克隆仓库
+
+```bash
+cd ~ && mkdir -p PROJECTS
+git clone https://github.com/SkyseRoma/scanner.git PROJECTS/scanner
+```
+
+### 7. 蓝牙音频 (可选)
+
+```bash
+sudo tee /etc/rc.local << 'EOF'
+#!/bin/bash
+pkill -9 -f pipewire 2>/dev/null
+pkill -9 -f wireplumber 2>/dev/null
+pulseaudio --system --daemonize --disallow-exit
+sleep 3
+echo -e 'connect XX:XX:XX:XX:XX:XX\nquit' | bluetoothctl
+sleep 2
+pactl set-default-sink bluez_sink.XX_XX_XX_XX_XX_XX.a2dp_sink 2>/dev/null
+exit 0
+EOF
+sudo chmod +x /etc/rc.local
+```
+
+### 8. 自启动服务
+
+```bash
+sudo systemctl enable ollama
+
+sudo tee /etc/systemd/system/scanner.service << 'EOF'
+[Unit]
+Description=Subnautica Scanner
+After=network.target ollama.service
+Requires=ollama.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/PROJECTS/scanner
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable scanner
+sudo systemctl start scanner
+```
+
+### 9. 验证
+
+浏览器打开: `http://scanner.local:8080`
 
 ## 硬件
 

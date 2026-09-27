@@ -7,9 +7,112 @@ Autonomous AI device in a Subnautica scanner case. Captures images from a camera
 ```
 Camera (OV5647) → picamera2 → ILI9341 (display, live preview)
                      │
-                     └─ Button → JPEG → Ollama (qwen3.5:0.8b) → text → MAX98357A (audio)
+                     └─ Button → JPEG → Ollama (qwen3.5:0.8b) → text → BT/I2S (audio)
                                                             └─ saved to data/database/<timestamp>/
 ```
+
+## Installation on Fresh System
+
+### 1. Raspberry Pi OS Lite (64-bit)
+
+Flash Raspberry Pi OS Lite using [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
+- **OS**: Raspberry Pi OS Lite (64-bit) — no desktop
+- **SSH**: enable
+- **Wi-Fi**: configure if no Ethernet
+- **Hostname**: `scanner`
+
+### 2. Connect
+
+```bash
+ssh pi@scanner.local
+```
+
+### 3. Basic Setup
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo raspi-config nonint do_spi 0
+sudo raspi-config nonint do_i2c 0
+sudo reboot
+```
+
+### 4. Install Dependencies
+
+```bash
+# System packages
+sudo apt install -y python3-pip python3-dev libcamera-dev python3-libcamera \
+    rpicam-apps libportaudio2 portaudio19-dev git i2c-tools spi-tools \
+    libopenblas-dev liblapack-dev cmake build-essential libcap-dev \
+    pulseaudio pulseaudio-module-bluetooth bluetooth bluez libspa-0.2-bluetooth
+
+# Python packages
+pip install --break-system-packages picamera2 numpy opencv-python RPi.GPIO \
+    rpi-lgpio spidev requests pillow omegaconf pyyaml soundfile
+```
+
+### 5. Install Ollama and Models
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3.5:0.8b
+ollama pull qwen2.5vl:3b
+```
+
+### 6. Clone Repository
+
+```bash
+cd ~ && mkdir -p PROJECTS
+git clone https://github.com/SkyseRoma/scanner.git PROJECTS/scanner
+```
+
+### 7. Bluetooth Audio (optional)
+
+```bash
+sudo tee /etc/rc.local << 'EOF'
+#!/bin/bash
+pkill -9 -f pipewire 2>/dev/null
+pkill -9 -f wireplumber 2>/dev/null
+pulseaudio --system --daemonize --disallow-exit
+sleep 3
+echo -e 'connect XX:XX:XX:XX:XX:XX\nquit' | bluetoothctl
+sleep 2
+pactl set-default-sink bluez_sink.XX_XX_XX_XX_XX_XX.a2dp_sink 2>/dev/null
+exit 0
+EOF
+sudo chmod +x /etc/rc.local
+```
+
+### 8. Autostart Services
+
+```bash
+sudo systemctl enable ollama
+
+sudo tee /etc/systemd/system/scanner.service << 'EOF'
+[Unit]
+Description=Subnautica Scanner
+After=network.target ollama.service
+Requires=ollama.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/PROJECTS/scanner
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable scanner
+sudo systemctl start scanner
+```
+
+### 9. Verify
+
+Open in browser: `http://scanner.local:8080`
 
 ## Hardware
 
