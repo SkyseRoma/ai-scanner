@@ -154,12 +154,13 @@ Todos los módulos conectados al header de 40 pines. **Sin conflictos.**
 
 | Archivo | Propósito |
 |---------|-----------|
-| `main.py` | Bucle principal: cámara → pantalla → escaneo → LLM → TTS |
+| `main.py` | Bucle principal: cámara → pantalla → escaneo → LLM → TTS + icono de batería |
 | `modules/camera.py` | Clase Camera — captura con picamera2 |
 | `modules/disp.py` | Clase Display — ILI9341 vía SPI |
 | `modules/llm.py` | Motor LLM — API de Ollama |
 | `modules/tts.py` | Clase TTS — Silero texto-a-voz |
-| `modules/web_ui.py` | Web UI: escaneos, chat, ajustes, logs |
+| `modules/ups.py` | Clase UPS — Waveshare UPS 3S (INA219 I2C) |
+| `modules/web_ui.py` | Web UI: escaneos, chat, ajustes, logs, batería |
 | `data/settings.json` | Ajustes: dirección Ollama, modelo, prompt |
 
 ## Backend LLM
@@ -242,5 +243,5 @@ data/database/
   └── 2026-09-27_14-30-00/
       ├── shot.jpg       # imagen de cámara
       ├── answer.txt     # respuesta de texto LLM
-      └── audio.mp3      # respuesta hablada
+      └── audio.wav      # respuesta hablada
 ```

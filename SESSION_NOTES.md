@@ -1,45 +1,44 @@
-# Scanner Project — Session Context
-
-## RPi5 Connection (NEW — clean install 2026-09-27)
+## RPi5 Connection
 - **OS**: Raspberry Pi OS Lite (Debian Trixie, aarch64, no desktop)
-- **Hostname**: `scanner` → `ssh pi@scanner.local`
+- **Hostname**: `scanner` → `ssh pi@scanner.local` (alias in ~/.ssh/config: `ssh scanner`)
+- **User**: `pi` (NOT `airpi2`)
 - **SSH key**: `~/.ssh/id_ed25519` (ed25519, passwordless)
-- **IP (WiFi)**: 192.168.1.21
-- **IP (Ethernet)**: 192.168.1.6
+- **IP (WiFi, SkyNet)**: 192.168.1.21 (wlan0, DHCP) — primary
+- **WiFi**: NetworkManager profile `SkyNet` (`sudo nmcli device wifi connect "SSID" password "..."`)
+- **SSH**: `ssh scanner` / `ssh pi@192.168.1.21` / `ssh pi@scanner.local`
+- **VSCode Remote-SSH**: `scanner` or `pi@192.168.1.21`
 - **sudo**: NOPASSWD configured (`/etc/sudoers.d/010_pi-nopasswd`)
 - **Project**: `/home/pi/PROJECTS/scanner/`
 - **Python**: 3.13.5 (system, no conda)
 - **Run manually**: `python3 main.py`
 - **Run as service**: `sudo systemctl start scanner`
+- **Web UI**: `http://scanner.local:8080` (port 8080)
 
 ## Project Structure
 ```
 scanner/
-├── main.py                    # main loop: camera → display → scan → LLM → TTS
+├── main.py                    # camera → display → scan → LLM → TTS + battery icon
 ├── run.sh                     # launcher
-├── README.md                  # Russian
-├── README_EN.md               # English
-├── README_ES.md               # Spanish
-├── README_ZH.md               # Chinese
-├── .gitignore
+├── README.md / README_EN.md / README_ES.md / README_ZH.md
 ├── modules/
 │   ├── camera.py              # picamera2, BGR888→BGR swap, 180° flip
 │   ├── disp.py                # ILI9341 via SPI0, lgpio (not RPi.GPIO)
-│   ├── llm.py                 # Ollama API /api/chat, dynamic model/language
-│   ├── tts.py                 # Silero TTS, paplay output, error recovery
-│   ├── web_ui.py              # Web UI: scans, chat, settings, logs (SSE)
+│   ├── llm.py                 # Ollama API /api/chat
+│   ├── tts.py                 # Silero TTS, paplay→aplay fallback
+│   ├── ups.py                 # Waveshare UPS 3S / INA219 I2C battery monitor
+│   ├── web_ui.py              # Web UI: scans, chat, settings, logs, battery
 │   └── __init__.py
 ├── data/
-│   ├── settings.json          # model, prompt, language, IP/port
-│   └── database/              # scan sessions (shot.jpg, answer.txt, audio.mp3)
-├── tools/                     # test scripts
+│   ├── settings.json          # model, prompt, language, Ollama IP/port
+│   └── database/              # scan sessions (shot.jpg, answer.txt, audio.wav)
+├── tools/                     # test_i2s, test_ups, test_speaker, test_button, ...
 └── Hardware/                  # 3D models, datasheets
 ```
 
 ## Hardware
 - **RPi5** 8GB, OV5647 camera, ILI9341 2.2" TFT (SPI0), button GPIO17
-- **Audio**: Bluetooth A2DP speaker (Aceline P450) — currently; MAX98357A I2S — pending delivery
-- **UPS Module 3S** (Waveshare) + 3×18650 — ordered
+- **Audio**: MAX98357A I2S (HifiBerry DAC, card 0) — primary; Bluetooth A2DP (Aceline P450) — optional
+- **UPS Module 3S** (Waveshare) + 3×18650 — **integrated** (INA219 @ 0x41 on I2C)
 - **MSP2202** screen datasheet in Hardware/
 
 ## GPIO Pinout (no conflicts)
@@ -49,7 +48,7 @@ scanner/
 | 2,4 | — | UPS | 5V |
 | 3 | GPIO2 | UPS | I2C SDA |
 | 5 | GPIO3 | UPS | I2C SCL |
-| 6,9 | — | UPS | GND |
+| 6,9 | — | UPS / MAX98357A | GND |
 | 11 | GPIO17 | Button | Scan (INPUT, pull-up) |
 | 12 | GPIO18 | MAX98357A | I2S BCLK |
 | 13 | GPIO27 | ILI9341 | LED backlight |
@@ -64,11 +63,13 @@ scanner/
 
 ## Software Stack
 - **Camera**: picamera2 (32 FPS @ 160x120 preview, 640x480 hi-res capture)
-- **Display**: ILI9341 via SPI0, RGB565, partial window updates, lgpio (NOT RPi.GPIO)
-- **LLM**: Ollama with vision models (see below)
-- **TTS**: Silero TTS (ru=xenia, en=en_0, es=es_1, zh→en fallback), output via paplay
-- **Audio**: PulseAudio system mode (NOT PipeWire), Bluetooth A2DP
-- **Web UI**: port 8080, scans/chat/settings/logs (SSE), i18n (ru/en/zh/es)
+- **Display**: ILI9341 SPI0, RGB565, lgpio; battery icon bottom-right
+- **LLM**: Ollama vision models
+- **TTS**: Silero (ru=xenia, en=en_0, es=es_1, zh→en); low-battery voice warn ≤15%
+- **I2S**: MAX98357A via `dtoverlay=hifiberry-dac` (card 0). config.txt: `dtparam=audio=off`, `dtoverlay=hifiberry-dac`
+- **UPS**: INA219 I2C 0x41 (`modules/ups.py`, `tools/test_ups.py`)
+- **Web UI**: :8080, battery badge/panel + `/api/battery`, i18n (ru/en/zh/es)
+- **Audio out**: PulseAudio (paplay), fallback aplay plughw:0,0
 
 ## Installed Ollama Models
 | Model | Size | Speed | Vision | Russian |
@@ -76,85 +77,64 @@ scanner/
 | **qwen3.5:0.8b** | 1.0 GB | ~28s | ✅ | ✅ |
 | **qwen2.5vl:3b** | 3.2 GB | ~107s | ✅ | ✅ |
 
-## Key Fixes Applied (this session)
+## Key Fixes Applied
 
 ### Camera
-- **picamera2 on system Python 3.13**: libcamera C++ module available natively (no sys.path hack needed)
-- **BGR888 → BGR swap**: picamera2 BGR888 actually gives RGB, need `frame[:, :, ::-1]`
-- **Image flip**: 180° in camera.py `capture_array()`
-- **LIBCAMERA_LOG_LEVELS=*:ERROR**: suppress C++ log spam
-- **Keyboard scan fix**: `sys.stdin.isatty()` check prevents constant scanning in service mode
+- picamera2 on system Python 3.13 (no sys.path hack)
+- BGR888 → BGR swap (`frame[:, :, ::-1]`), 180° flip
+- `LIBCAMERA_LOG_LEVELS=*:ERROR`
+- Keyboard scan: `sys.stdin.isatty()`
 
 ### GPIO
-- **lgpio instead of RPi.GPIO**: RPi.GPIO doesn't work on RPi5 (SOC peripheral base address error)
-- lgpio: `gpiochip_open(0)`, `gpio_claim_output()`, `gpio_write()`
+- lgpio, not RPi.GPIO (RPi5)
 
 ### Audio
-- **PipeWire → PulseAudio**: PipeWire Bluetooth A2DP doesn't work; PulseAudio system mode works
-- **aplay → paplay**: `paplay` properly resamples for Bluetooth (48kHz mono → 44.1kHz stereo)
-- **I2S config**: commented out in `/boot/firmware/config.txt` (waiting for MAX98357A delivery)
-- **Bluetooth autoconnect**: configured in `/etc/rc.local`
+- PipeWire → PulseAudio; paplay for BT resample
+- I2S MAX98357A enabled (2026-10-13); HifiBerry DAC card 0
+- TTS: paplay → aplay fallback
+- Session audio files: `audio.wav` (not .mp3)
 
-### LLM
-- **Dynamic model update**: `gpt.model` and `gpt.prompt` refresh from settings.json before each scan
-- **Language injection**: system prompt appends "Respond in {language}" dynamically
-- **Prompt**: detailed PDA scanner rules with format requirements
-
-### TTS
-- **Error recovery**: 3 attempts with progressive text truncation on failure
-- **trust_repo=True**: required for torch.hub.load with newer torch versions
-- **Text truncation**: max 500 chars before TTS to avoid Silero kernel size error
+### UPS / Battery
+- Wiring: SDA GPIO2, SCL GPIO3, **common GND** (do NOT put Pi GND into 3.3V)
+- INA219 responds at **0x41** (also probes 0x40/0x44/0x45)
+- `modules/ups.py` + battery icon on display + Web UI panel
+- Low-battery TTS warning at ≤15% (repeat 5 min); texts ru/en/es (zh→en audio)
+- Test: `python3 tools/test_ups.py [--loop] [--raw]`
 
 ### Web UI
-- **Model selector**: dropdown populated from `/api/models` (Ollama API)
-- **Log panel**: SSE (Server-Sent Events) real-time log viewer
-- **Auto-refresh**: scan list updates every 5 seconds
-- **Console logging**: language/model changes printed to terminal
+- Model selector, SSE logs, auto-refresh scans
+- Battery badge in header (click = detailed panel), `/api/battery`
+- `/api/scan/<id>/audio` serves `audio.wav` and legacy `audio.mp3`
 
 ## Service Management
 ```bash
-# Scanner
-sudo systemctl start scanner
-sudo systemctl stop scanner
-sudo systemctl restart scanner
-sudo systemctl status scanner
+sudo systemctl start|stop|restart|status scanner
 journalctl -u scanner -f
-
-# Ollama
-sudo systemctl status ollama
-sudo systemctl restart ollama
 ```
 
-## Audio Setup (Bluetooth)
-```bash
-# Pair speaker (one-time)
-bluetoothctl
-  power on
-  scan on
-  pair XX:XX:XX:XX:XX:XX
-  trust XX:XX:XX:XX:XX:XX
-  connect XX:XX:XX:XX:XX:XX
-  quit
-
-# Set as default sink
-pactl set-default-sink bluez_sink.XX_XX_XX_XX_XX_XX.a2dp_sink
-```
+## Tools (manual tests)
+| Script | Purpose |
+|--------|---------|
+| `tools/test_ups.py` | UPS INA219 voltage/current/% |
+| `tools/test_i2s.py` | MAX98357A / HifiBerry tone test |
+| `tools/test_speaker.py` | Voice samples A/B for speakers |
+| `tools/test_button.py` | GPIO17 button |
+| `tools/test_display.py` | ILI9341 |
+| `tools/test_tts.py` | Silero (note: uses old `tts.model_id` attr — may fail) |
 
 ## Known Issues / TODO
-- ✅ FPS: picamera2 gives 32 FPS (was 3-5 with rpicam-still)
-- ✅ Bluetooth audio: works via PulseAudio system mode
-- ⏳ MAX98357A I2S audio: waiting for delivery
-- ⏳ Battery (UPS Module 3S): not yet integrated
-- ⏳ 3D model: standoffs for RPi need adjustment after physical dry-fit
-- ⏳ screen_case.obj: clips/latches designed, need refinement in Blender
+- ✅ FPS: picamera2 32 FPS
+- ✅ Bluetooth / I2S MAX98357A audio
+- ✅ WiFi SkyNet
+- ✅ UPS 3S I2C battery monitor + UI + voice warn
+- ⏳ 3D model: RPi standoffs after dry-fit
+- ⏳ screen_case.obj: clips refinement in Blender
 
 ## 3D Models
-- `Hardware/scanner_parts/screen_case.obj` — screen case (2 parts: back + front)
-- `Hardware/scanner_parts/screen_case_clips.obj` — with snap-fit clips added
-- `Hardware/scanner_parts/` — OBJ/STL files for Blender/printing
-- Display: MSP2202 (67.2×40.1mm PCB, 45.12×33.84mm active)
+- `Hardware/scanner_parts/` — screen case, clips, OBJ/STL
+- Display: MSP2202 (67.2×40.1mm PCB)
 
-## LLM Prompt (in settings.json)
+## LLM Prompt (data/settings.json)
 ```
 You are a PDA scanner from the game Subnautica. You analyze objects detected by the scanner camera.
 

@@ -156,13 +156,26 @@ All modules connected to single 40-pin header. **No conflicts.**
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Main loop: camera → display → scan → LLM → TTS |
+| `main.py` | Main loop: camera → display → scan → LLM → TTS + battery icon |
 | `modules/camera.py` | Camera class — picamera2 capture |
 | `modules/disp.py` | Display class — ILI9341 via SPI |
 | `modules/llm.py` | LLM engine — Ollama API |
 | `modules/tts.py` | TTS class — Silero text-to-speech |
-| `modules/web_ui.py` | Web UI: scans, chat, settings, logs |
+| `modules/ups.py` | UPS class — Waveshare UPS 3S (INA219 I2C) |
+| `modules/web_ui.py` | Web UI: scans, chat, settings, logs, battery |
 | `data/settings.json` | Settings: Ollama address, model, prompt |
+
+Tests in `tools/`: `test_ups.py`, `test_i2s.py`, `test_speaker.py`, `test_button.py`, `test_display.py`.
+
+## Battery (UPS Module 3S)
+
+- **INA219** on I2C (address **0x41**): SDA=GPIO2 (pin 3), SCL=GPIO3 (pin 5), common GND
+- Battery icon on the ILI9341 display (bottom-right)
+- Web UI badge + detailed panel, API `GET /api/battery`
+- Voice warning at **≤ 15%** charge (ru/en/es; zh uses English audio)
+- Test: `python3 tools/test_ups.py`
+
+**Important:** connect Raspberry Pi GND to UPS **GND**, not 3.3V.
 
 ## LLM Backend
 
@@ -244,5 +257,5 @@ data/database/
   └── 2026-09-27_14-30-00/
       ├── shot.jpg       # camera frame
       ├── answer.txt     # LLM text response
-      └── audio.mp3      # spoken response
+      └── audio.wav      # spoken response
 ```

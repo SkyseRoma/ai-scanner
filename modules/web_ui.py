@@ -53,6 +53,25 @@ def load_settings():
         return {}
 
 
+_batt_cache = {"t": 0, "data": None}
+
+
+def get_battery_status():
+    now = time.time()
+    if now - _batt_cache["t"] < 2.0 and _batt_cache["data"] is not None:
+        return _batt_cache["data"]
+    try:
+        from modules.ups import UPS
+        ups = UPS()
+        st = ups.read_status()
+        ups.close()
+    except Exception as e:
+        st = {"available": False, "error": str(e)}
+    _batt_cache["t"] = now
+    _batt_cache["data"] = st
+    return st
+
+
 def save_settings(data):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -194,12 +213,34 @@ a { color:var(--accent); }
 .log-status { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
 .log-status .dot { width:8px; height:8px; border-radius:50%; background:var(--success); animation:pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* Battery */
+.batt-badge { display:flex; align-items:center; gap:8px; margin-left:12px; padding:6px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer; white-space:nowrap; font-size:.85em; }
+.batt-badge:hover { border-color:var(--accent); }
+.batt-icon { width:22px; height:11px; border:1px solid var(--text); border-radius:2px; position:relative; display:inline-block; box-sizing:border-box; background:var(--bg-input); overflow:hidden; }
+.batt-icon::after { content:''; position:absolute; right:-3px; top:2px; width:2px; height:5px; background:var(--text); border-radius:0 1px 1px 0; z-index:1; }
+.batt-fill { display:block; height:100%; width:0%; background:var(--success); border-radius:0; min-width:0; }
+.batt-fill.low { background:var(--danger); }
+.batt-fill.mid { background:#ffd54f; }
+.batt-panel { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:14px 16px; margin:12px 0; }
+.batt-panel h3 { color:var(--accent); font-size:.95em; margin-bottom:10px; }
+.batt-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
+.batt-grid .item { background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:10px; }
+.batt-grid .label { font-size:.75em; color:var(--accent2); margin-bottom:4px; }
+.batt-grid .value { font-size:1.15em; color:var(--text-bright); }
+.batt-panel .status-charging { color:var(--success); }
+.batt-panel .status-idle { color:var(--accent2); }
+.batt-panel .status-error { color:var(--danger); }
 </style>
 </head>
 <body>
 
 <div class="header">
   <h1>SUBNAUTICA SCANNER</h1>
+  <div class="batt-badge" id="batt-badge" onclick="toggleBattPanel()" title="Battery">
+    <span class="batt-icon"><span class="batt-fill" id="batt-fill" style="width:60%"></span></span>
+    <span id="batt-text">—%</span>
+  </div>
   <div class="nav">
     <button class="nav-btn active" onclick="showSection('scans')" data-i18n="nav_scans">Сканы</button>
     <button class="nav-btn" onclick="showSection('chat')" data-i18n="nav_chat">Чат</button>
@@ -215,6 +256,13 @@ a { color:var(--accent); }
 </div>
 
 <div class="content">
+<!-- Battery (detailed) -->
+<div class="batt-panel" id="batt-panel" style="display:none">
+  <h3 data-i18n="batt_title">Батарея UPS</h3>
+  <div class="batt-grid" id="batt-grid"></div>
+  <div id="batt-status" class="status-idle" style="margin-top:10px;font-size:.85em"></div>
+</div>
+
 <!-- Scans -->
 <div class="section active" id="sec-scans">
   <h2 style="color:var(--accent);margin-bottom:15px" data-i18n="scans_title">База сканов</h2>
@@ -282,6 +330,9 @@ const LANGS = {
     label_you:'Вы', label_ai:'Сканер',
     ask_prompt:'Расскажи подробнее об этом скане.',
     logs_live:'Обновление в реальном времени',
+    batt_title:'Батарея UPS', batt_na:'Нет данных',
+    batt_percent:'Заряд', batt_voltage:'Напряжение', batt_current:'Ток',
+    batt_power:'Мощность', batt_range:'Диапазон', batt_charging:'Идёт зарядка', batt_discharging:'Разрядка / работа',
   },
   en: {
     nav_scans:'Scans', nav_chat:'Chat', nav_settings:'Settings', nav_logs:'Logs',
@@ -295,6 +346,9 @@ const LANGS = {
     label_you:'You', label_ai:'Scanner',
     ask_prompt:'Tell me more about this scan.',
     logs_live:'Real-time updates',
+    batt_title:'UPS Battery', batt_na:'No data',
+    batt_percent:'Charge', batt_voltage:'Voltage', batt_current:'Current',
+    batt_power:'Power', batt_range:'Range', batt_charging:'Charging', batt_discharging:'Discharging / load',
   },
   zh: {
     nav_scans:'扫描', nav_chat:'聊天', nav_settings:'设置', nav_logs:'日志',
@@ -308,6 +362,9 @@ const LANGS = {
     label_you:'你', label_ai:'扫描仪',
     ask_prompt:'请详细介绍这次扫描。',
     logs_live:'实时更新',
+    batt_title:'UPS 电池', batt_na:'无数据',
+    batt_percent:'电量', batt_voltage:'电压', batt_current:'电流',
+    batt_power:'功率', batt_range:'范围', batt_charging:'充电中', batt_discharging:'放电 / 使用中',
   },
   es: {
     nav_scans:'Escaneos', nav_chat:'Chat', nav_settings:'Ajustes', nav_logs:'Logs',
@@ -321,6 +378,9 @@ const LANGS = {
     label_you:'Tú', label_ai:'Escáner',
     ask_prompt:'Cuéntame más sobre este escaneo.',
     logs_live:'Actualización en tiempo real',
+    batt_title:'Batería UPS', batt_na:'Sin datos',
+    batt_percent:'Carga', batt_voltage:'Voltaje', batt_current:'Corriente',
+    batt_power:'Potencia', batt_range:'Rango', batt_charging:'Cargando', batt_discharging:'Descarga / uso',
   },
 };
 
@@ -374,6 +434,52 @@ setInterval(() => {
     });
   }
 }, 5000);
+
+// Battery
+function toggleBattPanel() {
+  const p = document.getElementById('batt-panel');
+  const show = p.style.display === 'none';
+  p.style.display = show ? 'block' : 'none';
+  if (show) loadBattery(true);
+}
+
+function loadBattery(force) {
+  fetch('/api/battery').then(r=>r.json()).then(b => {
+    const fill = document.getElementById('batt-fill');
+    const text = document.getElementById('batt-text');
+    if (!b || !b.available) {
+      fill.style.width = '0%';
+      fill.className = 'batt-fill low';
+      text.textContent = t('batt_na');
+      if (force) {
+        document.getElementById('batt-grid').innerHTML = '';
+        const st = document.getElementById('batt-status');
+        st.className = 'status-error';
+        st.textContent = (b && b.error) ? b.error : t('batt_na');
+      }
+      return;
+    }
+    const pct = Math.max(0, Math.min(100, Math.round(b.percent || 0)));
+    fill.style.width = pct + '%';
+    fill.className = 'batt-fill' + (pct < 20 ? ' low' : pct < 50 ? ' mid' : '');
+    text.textContent = pct + '%' + (b.charging ? ' ⚡' : '');
+    if (force || document.getElementById('batt-panel').style.display !== 'none') {
+      const rows = [
+        [t('batt_percent'), pct + '%'],
+        [t('batt_voltage'), b.voltage_v + ' V'],
+        [t('batt_current'), (b.current_a * 1000).toFixed(0) + ' mA'],
+        [t('batt_power'), b.power_w + ' W'],
+      ];
+      document.getElementById('batt-grid').innerHTML = rows.map(([l,v]) =>
+        `<div class="item"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
+      const st = document.getElementById('batt-status');
+      st.className = b.charging ? 'status-charging' : 'status-idle';
+      st.textContent = b.charging ? t('batt_charging') : t('batt_discharging');
+    }
+  }).catch(() => {});
+}
+loadBattery(true);
+setInterval(() => loadBattery(false), 5000);
 
 function showModal(src) { document.getElementById('modal-img').src = src; document.getElementById('modal').classList.add('active'); }
 
@@ -532,16 +638,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path.startswith('/api/scan/') and path.endswith('/audio'):
             scan_id = path.split('/')[3]
-            audio_path = os.path.join(DB_DIR, scan_id, "audio.mp3")
-            if os.path.exists(audio_path):
+            scan_dir = os.path.join(DB_DIR, scan_id)
+            # new sessions use audio.wav; old ones still have audio.mp3
+            audio_path = None
+            for name, mime in (("audio.wav", "audio/wav"), ("audio.mp3", "audio/mpeg")):
+                p = os.path.join(scan_dir, name)
+                if os.path.exists(p):
+                    audio_path = p
+                    content_type = mime
+                    break
+            if audio_path:
                 self.send_response(200)
-                self.send_header('Content-Type', 'audio/mpeg')
+                self.send_header('Content-Type', content_type)
                 self.end_headers()
                 with open(audio_path, 'rb') as f:
                     self.wfile.write(f.read())
             else:
                 self.send_response(404)
                 self.end_headers()
+
+        elif path == '/api/battery':
+            self._json(get_battery_status())
 
         elif path == '/api/settings':
             self._json(load_settings())

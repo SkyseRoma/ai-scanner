@@ -154,12 +154,13 @@ sudo systemctl start scanner
 
 | 文件 | 用途 |
 |------|------|
-| `main.py` | 主循环: 摄像头 → 显示屏 → 扫描 → LLM → TTS |
+| `main.py` | 主循环: 摄像头 → 显示屏 → 扫描 → LLM → TTS + 电池图标 |
 | `modules/camera.py` | Camera类 — picamera2捕获 |
 | `modules/disp.py` | Display类 — ILI9341 SPI驱动 |
 | `modules/llm.py` | LLM引擎 — Ollama API |
 | `modules/tts.py` | TTS类 — Silero语音合成 |
-| `modules/web_ui.py` | Web UI: 扫描记录, 聊天, 设置, 日志 |
+| `modules/ups.py` | UPS类 — Waveshare UPS 3S (INA219 I2C) |
+| `modules/web_ui.py` | Web UI: 扫描记录, 聊天, 设置, 日志, 电池 |
 | `data/settings.json` | 设置: Ollama地址, 模型, 提示词 |
 
 ## LLM后端
@@ -242,5 +243,5 @@ data/database/
   └── 2026-09-27_14-30-00/
       ├── shot.jpg       # 摄像头帧
       ├── answer.txt     # LLM文本响应
-      └── audio.mp3      # 语音响应
+      └── audio.wav      # 语音响应
 ```

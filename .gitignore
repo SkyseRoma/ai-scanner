@@ -10,3 +10,4 @@ data/output.wav
 *.log
 Hardware/
 Backups/
+.mimocode/

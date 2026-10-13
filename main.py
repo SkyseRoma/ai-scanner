@@ -8,11 +8,13 @@ import cv2
 import numpy as np
 import lgpio
 from modules import *
+from modules.ups import UPS
 
 BTN_PIN = 17
 W, H = 320, 240
 last_scan_time = 0
 SCAN_COOLDOWN = 5
+BATT_REFRESH_S = 2.0
 
 _gpio = None
 
@@ -70,6 +72,28 @@ def frame_to_rgb565(frame):
     return ((rgb565 & 0xFF) << 8) | (rgb565 >> 8)
 
 
+def draw_battery_icon(frame, percent, charging=False):
+    """Small battery icon in bottom-right corner of BGR frame."""
+    h, w = frame.shape[:2]
+    iw, ih = 30, 12
+    x0, y0 = w - iw - 6, h - ih - 6
+    outline = (0, 255, 255)  # yellow-ish in BGR
+    cv2.rectangle(frame, (x0, y0), (x0 + iw, y0 + ih), outline, 1)
+    cv2.rectangle(frame, (x0 + iw, y0 + 3), (x0 + iw + 3, y0 + ih - 3), outline, -1)
+    pct = max(0, min(100, int(percent)))
+    if pct >= 50:
+        fill = (0, 255, 0)
+    elif pct >= 20:
+        fill = (0, 255, 255)
+    else:
+        fill = (0, 0, 255)
+    fill_w = int((iw - 4) * pct / 100)
+    if fill_w > 0:
+        cv2.rectangle(frame, (x0 + 2, y0 + 2), (x0 + 2 + fill_w, y0 + ih - 2), fill, -1)
+    if charging:
+        cv2.putText(frame, "+", (x0 - 10, y0 + ih - 1), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
+
+
 def scan_animation(disp, frame_rgb565, stop_event):
     """Green scanning line animation."""
     line_h = 3
@@ -103,6 +127,52 @@ LANG_QUESTIONS = {
     "es": "Escanea este objeto. Describe en español.",
 }
 
+# Low-battery voice warning. zh uses English audio (Silero has no Chinese).
+BATT_WARN_LEVEL = 15.0
+BATT_WARN_REPEAT_S = 300.0
+BATT_WARN_MSG = {
+    "ru": "Внимание! Батарея почти разряжена. Осталось {pct} процентов. Подключите зарядку.",
+    "en": "Warning! Battery is low. {pct} percent remaining. Please connect the charger.",
+    "zh": "Warning! Battery is low. {pct} percent remaining. Please connect the charger.",
+    "es": "¡Advertencia! Batería baja. Queda {pct} por ciento. Conecte el cargador.",
+}
+TTS_LANG_FOR_WARN = {"zh": "en"}
+
+
+def maybe_warn_low_battery(tts, batt, state):
+    """Speak low-battery warning at most every BATT_WARN_REPEAT_S seconds."""
+    if not batt or not batt.get("available"):
+        return
+    if batt.get("charging"):
+        return
+    pct = float(batt.get("percent") or 0)
+    if pct > BATT_WARN_LEVEL:
+        state["warned"] = False
+        return
+    now = time.time()
+    if state.get("warned") and now - state.get("t", 0) < BATT_WARN_REPEAT_S:
+        return
+
+    try:
+        import json
+        with open("data/settings.json") as f:
+            lang = (json.load(f).get("language") or "ru").lower()
+    except Exception:
+        lang = "ru"
+    if lang not in BATT_WARN_MSG:
+        lang = "en"
+
+    msg = BATT_WARN_MSG[lang].format(pct=int(pct))
+    print(f"[!] Low battery ({pct:.0f}%): {msg}")
+    try:
+        tts.set_language(TTS_LANG_FOR_WARN.get(lang, lang))
+        tts.synthesize_and_play(msg, save_path="data/battery_low.wav")
+    except Exception as e:
+        print(f"Battery warn TTS error: {e}")
+
+    state["warned"] = True
+    state["t"] = now
+
 
 def run():
     ensure_ollama()
@@ -110,6 +180,11 @@ def run():
     tts = TTS()
     disp = PiCameraDisplay()
     init_button()
+
+    ups = UPS()
+    batt = ups.read_status()
+    batt_t = 0.0
+    batt_warn_state = {"warned": False, "t": 0.0}
 
     cam = Camera(width=160, height=120)
     cam.start()
@@ -123,6 +198,10 @@ def run():
     print("Scanner started! (picamera2)")
     print("-> GPIO17 button or ENTER — capture")
     print("-> Web UI: http://<IP>:8080")
+    if batt and batt.get("available"):
+        print(f"-> Battery: {batt.get('percent')}% ({batt.get('voltage_v')}V)")
+    else:
+        print(f"-> Battery: not available ({ups.error})")
     print("-> Ctrl+C — exit")
     print("=" * 50 + "\n")
 
@@ -133,15 +212,23 @@ def run():
                 time.sleep(0.05)
                 continue
 
+            now = time.time()
+            if now - batt_t >= BATT_REFRESH_S:
+                batt = ups.read_status()
+                batt_t = now
+                maybe_warn_low_battery(tts, batt, batt_warn_state)
+
             try:
-                frame_raw = frame_to_rgb565(frame)
+                frame_disp = cv2.resize(frame, (W, H))
+                if batt and batt.get("available"):
+                    draw_battery_icon(frame_disp, batt.get("percent", 0), batt.get("charging", False))
+                frame_raw = frame_to_rgb565(frame_disp)
                 disp._set_window()
                 disp._send_data(frame_raw.tobytes())
             except Exception:
                 frame_raw = None
 
             global last_scan_time
-            now = time.time()
             if (check_button() or check_keyboard()) and (now - last_scan_time > SCAN_COOLDOWN):
                 last_scan_time = now
                 print("\n[!] Capture!")
@@ -152,7 +239,7 @@ def run():
 
                 image_path = os.path.join(session_dir, "shot.jpg")
                 text_path = os.path.join(session_dir, "answer.txt")
-                audio_path = os.path.join(session_dir, "audio.mp3")
+                audio_path = os.path.join(session_dir, "audio.wav")
 
                 # Stop camera, capture hi-res frame
                 cam.stop()
@@ -207,6 +294,7 @@ def run():
         print("\nShutting down...")
     finally:
         cam.stop()
+        ups.close()
         if _gpio is not None:
             lgpio.gpiochip_close(_gpio)
         disp.cleanup()

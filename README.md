@@ -135,7 +135,7 @@ sudo systemctl start scanner
 | Дисплей | MSP2202 ILI9341 TFT 2.2" 320×240, SPI |
 | Аудио | MAX98357A I2S, 3W на динамик |
 | AI | Ollama + qwen3.5:0.8b (локально на CPU) |
-| Питание | UPS Module 3S (Waveshare) + 3×18650 2500mAh |
+| Питание | UPS Module 3S (Waveshare) + 3×18650 2500mAh, INA219 (I2C 0x41) |
 | Кнопка | Тактильная кнопка (сканирование) |
 | Корпус | 3D-печать, сканер из Subnautica (`Hardware/subnuatica_scanner.3mf`) |
 
@@ -216,16 +216,17 @@ Pull-up внутренний: `GPIO.PUD_UP`. Нажатие = LOW.
 
 | Файл | Назначение |
 |------|------------|
-| `main.py` | Главный цикл: камера → дисплей → снимок → LLM → TTS |
-| `scanner_web.py` | Web UI: MJPEG стрим + кнопка сканирования |
-| `camera_stream.py` | MJPEG stream server (только видео) |
-| `camera_test.py` | Тест захвата одного кадра |
-| `modules/camera.py` | Класс `Camera` — захват через rpicam-still |
-| `modules/disp.py` | Класс `PiCameraDisplay` — трансляция на ILI9341 через SPI |
-| `modules/llm.py` | Класс `LLM_engine` — запросы к Ollama (нативный API) |
-| `modules/tts.py` | Класс `TTS` — генерация речи (Silero `v4_ru`, голос `aidar`) |
-| `modules/settings.json` | Настройки: адрес Ollama, модель, промпт |
-| `modules/database/` | Сессии: `shot.jpg`, `answer.txt`, `audio.mp3` |
+| `main.py` | Главный цикл: камера → дисплей → снимок → LLM → TTS + значок батареи |
+| `modules/camera.py` | Класс `Camera` — picamera2, flip 180° |
+| `modules/disp.py` | Класс `PiCameraDisplay` — ILI9341 через SPI (lgpio) |
+| `modules/llm.py` | Класс `LLM_engine` — Ollama `/api/chat` |
+| `modules/tts.py` | Класс `TTS` — Silero, paplay → aplay |
+| `modules/ups.py` | Класс `UPS` — Waveshare UPS 3S, INA219 по I2C |
+| `modules/web_ui.py` | Web UI :8080 — сканы, чат, настройки, логи, батарея |
+| `data/settings.json` | Модель, промпт, язык, адрес Ollama |
+| `data/database/` | Сессии: `shot.jpg`, `answer.txt`, `audio.wav` |
+
+Тесты в `tools/`: `test_ups.py`, `test_i2s.py`, `test_speaker.py`, `test_button.py`, `test_display.py`, `test_tts.py`.
 
 ## LLM-бэкенд
 
@@ -248,20 +249,19 @@ Pull-up внутренний: `GPIO.PUD_UP`. Нажатие = LOW.
 
 ```bash
 # SSH на Raspberry Pi 5
-ssh airpi2@192.168.1.21
-
-# Активировать окружение
-conda activate scanner
+ssh pi@scanner.local
+# или по IP (Ethernet): ssh pi@192.168.1.14
+# пользователь — pi, не airpi2
 
 # Запустить Ollama (если не запущен)
 OLLAMA_MAX_LOADED_MODELS=1 nohup ollama serve &
 
-# Запустить web UI
+# Запустить scanner (web UI поднимается автоматически)
 cd PROJECTS/scanner
-python3 scanner_web.py
+python3 main.py
 ```
 
-Открыть в браузере: `http://192.168.1.21:9090`
+Открыть в браузере: `http://scanner.local:8080`
 
 - Видео обновляется в реальном времени
 - Кнопка **«СКАНИРОВАТЬ»** — захват + анализ + озвучка
@@ -289,12 +289,22 @@ pip install opencv-python-headless numpy Pillow soundfile torch requests RPi.GPI
 ## Структура сессии (database)
 
 ```
-modules/database/
+data/database/
   └── 2026-06-22_21-30-53/
       ├── shot.jpg       # кадр с камеры
       ├── answer.txt     # текстовый ответ LLM
-      └── audio.mp3      # озвученный ответ
+      └── audio.wav      # озвученный ответ
 ```
+
+## Батарея (UPS Module 3S)
+
+- Датчик **INA219** по I2C (адрес **0x41**): SDA=GPIO2 (pin 3), SCL=GPIO3 (pin 5), общий GND
+- Значок заряда — в правом нижнем углу ILI9341
+- Web UI — иконка в шапке и панель (напряжение, ток, мощность), API `GET /api/battery`
+- Голосовое предупреждение при заряде **≤ 15%** (ru/en/es; zh — английское аудио)
+- Тест: `python3 tools/test_ups.py` (или `--loop`, `--raw`)
+
+**Важно:** GND Raspberry Pi подключать к **GND** UPS, не к 3.3V.
 
 ## Управление сервисами
 

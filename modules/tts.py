@@ -70,10 +70,23 @@ class TTS:
         sf.write(output_path, self.audio.numpy(), self.sample_rate)
         print(f"Audio: {output_path}")
 
-        try:
-            subprocess.run(["paplay", output_path], check=False)
-        except Exception as e:
-            print(f"Playback error: {e}")
+        # paplay first (PulseAudio owns I2S/BT); aplay fallback if PA is down
+        played = False
+        for cmd in (
+            ["paplay", output_path],
+            ["aplay", "-D", "plughw:0,0", output_path],
+            ["aplay", output_path],
+        ):
+            try:
+                r = subprocess.run(cmd, check=False, capture_output=True, text=True)
+                if r.returncode == 0:
+                    played = True
+                    break
+                print(f"Playback {cmd[0]} failed: {r.stderr.strip()}")
+            except Exception as e:
+                print(f"Playback {cmd[0]} error: {e}")
+        if not played:
+            print("Playback error: all outputs failed")
 
 
 if __name__ == "__main__":
