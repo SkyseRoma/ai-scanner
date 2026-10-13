@@ -1,0 +1,15 @@
+[Unit]
+Description=Scanner WiFi hotspot fallback
+After=network.target NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/PROJECTS/scanner
+ExecStart=/usr/bin/python3 /home/pi/PROJECTS/scanner/tools/wifi_fallback.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

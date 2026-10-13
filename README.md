@@ -216,14 +216,15 @@ Pull-up внутренний: `GPIO.PUD_UP`. Нажатие = LOW.
 
 | Файл | Назначение |
 |------|------------|
-| `main.py` | Главный цикл: камера → дисплей → снимок → LLM → TTS + значок батареи |
+| `main.py` | Главный цикл: камера → дисплей → снимок → LLM → TTS + статус-полоса |
 | `modules/camera.py` | Класс `Camera` — picamera2, flip 180° |
 | `modules/disp.py` | Класс `PiCameraDisplay` — ILI9341 через SPI (lgpio) |
 | `modules/llm.py` | Класс `LLM_engine` — Ollama `/api/chat` |
 | `modules/tts.py` | Класс `TTS` — Silero, paplay → aplay |
 | `modules/ups.py` | Класс `UPS` — Waveshare UPS 3S, INA219 по I2C |
-| `modules/web_ui.py` | Web UI :8080 — сканы, чат, настройки, логи, батарея |
-| `data/settings.json` | Модель, промпт, язык, адрес Ollama |
+| `modules/wifi.py` | Wi-Fi: скан, подключение, точка доступа (nmcli) |
+| `modules/web_ui.py` | Web UI :8080 — сканы, чат, настройки, логи, батарея, Wi-Fi |
+| `data/settings.json` | Модель, промпт, язык, Ollama, wifi_ap_* |
 | `data/database/` | Сессии: `shot.jpg`, `answer.txt`, `audio.wav` |
 
 Тесты в `tools/`: `test_ups.py`, `test_i2s.py`, `test_speaker.py`, `test_button.py`, `test_display.py`, `test_tts.py`.
@@ -299,12 +300,22 @@ data/database/
 ## Батарея (UPS Module 3S)
 
 - Датчик **INA219** по I2C (адрес **0x41**): SDA=GPIO2 (pin 3), SCL=GPIO3 (pin 5), общий GND
-- Значок заряда — в правом нижнем углу ILI9341
+- **Статус-полоса** внизу ILI9341: язык · IP · Wi-Fi (столбики + SSID) · батарея %
 - Web UI — иконка в шапке и панель (напряжение, ток, мощность), API `GET /api/battery`
 - Голосовое предупреждение при заряде **≤ 15%** (ru/en/es; zh — английское аудио)
 - Тест: `python3 tools/test_ups.py` (или `--loop`, `--raw`)
 
 **Важно:** GND Raspberry Pi подключать к **GND** UPS, не к 3.3V.
+
+## Wi-Fi и точка доступа
+
+- Знакомые сети: NetworkManager (`nmcli`); в **Настройках → Wi-Fi** можно сканировать и подключаться
+- Если нет знакомой сети — сервис `scanner-wifi-fallback` поднимает AP **`Scanner-AP`**, пароль **`scanner123`**
+- В AP-режиме IP малины: **`10.42.0.1`**, Web UI: `http://10.42.0.1:8080/`
+- В AP сканирование недоступно (одно радио) — ввод SSID и пароля вручную
+- Подключение из AP: кратко выключает AP, подключается к сети (при ошибке AP возвращается)
+- Пароль AP: `wifi_ap_ssid` / `wifi_ap_password` в `data/settings.json`
+- systemd: `sudo systemctl status scanner-wifi-fallback`
 
 ## Управление сервисами
 

@@ -170,12 +170,21 @@ Tests in `tools/`: `test_ups.py`, `test_i2s.py`, `test_speaker.py`, `test_button
 ## Battery (UPS Module 3S)
 
 - **INA219** on I2C (address **0x41**): SDA=GPIO2 (pin 3), SCL=GPIO3 (pin 5), common GND
-- Battery icon on the ILI9341 display (bottom-right)
+- **Status bar** on ILI9341 (bottom): language · IP · Wi-Fi (bars + SSID) · battery %
 - Web UI badge + detailed panel, API `GET /api/battery`
 - Voice warning at **≤ 15%** charge (ru/en/es; zh uses English audio)
 - Test: `python3 tools/test_ups.py`
 
 **Important:** connect Raspberry Pi GND to UPS **GND**, not 3.3V.
+
+## Wi-Fi and hotspot
+
+- Settings → Wi-Fi: scan and connect in client mode
+- If no known network: `scanner-wifi-fallback` starts AP **`Scanner-AP`** / **`scanner123`**
+- In AP mode the Pi is **`10.42.0.1`** → `http://10.42.0.1:8080/`
+- AP cannot scan (single radio) — enter SSID + password manually
+- Connect from AP briefly drops AP, then joins the network
+- `wifi_ap_ssid` / `wifi_ap_password` in `data/settings.json`
 
 ## LLM Backend
 

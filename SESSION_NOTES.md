@@ -4,8 +4,10 @@
 - **User**: `pi` (NOT `airpi2`)
 - **SSH key**: `~/.ssh/id_ed25519` (ed25519, passwordless)
 - **IP (WiFi, SkyNet)**: 192.168.1.21 (wlan0, DHCP) — primary
+- **IP (hotspot Scanner-AP)**: 10.42.0.1 (when no known network)
 - **WiFi**: NetworkManager profile `SkyNet` (`sudo nmcli device wifi connect "SSID" password "..."`)
-- **SSH**: `ssh scanner` / `ssh pi@192.168.1.21` / `ssh pi@scanner.local`
+- **Hotspot**: SSID `Scanner-AP`, password `scanner123` (or wifi_ap_* in settings.json)
+- **SSH**: `ssh scanner` / `ssh pi@192.168.1.21` / `ssh pi@10.42.0.1` (AP) / `ssh pi@scanner.local`
 - **VSCode Remote-SSH**: `scanner` or `pi@192.168.1.21`
 - **sudo**: NOPASSWD configured (`/etc/sudoers.d/010_pi-nopasswd`)
 - **Project**: `/home/pi/PROJECTS/scanner/`
@@ -17,7 +19,7 @@
 ## Project Structure
 ```
 scanner/
-├── main.py                    # camera → display → scan → LLM → TTS + battery icon
+├── main.py                    # camera → display → status bar → scan → LLM → TTS
 ├── run.sh                     # launcher
 ├── README.md / README_EN.md / README_ES.md / README_ZH.md
 ├── modules/
@@ -26,12 +28,13 @@ scanner/
 │   ├── llm.py                 # Ollama API /api/chat
 │   ├── tts.py                 # Silero TTS, paplay→aplay fallback
 │   ├── ups.py                 # Waveshare UPS 3S / INA219 I2C battery monitor
-│   ├── web_ui.py              # Web UI: scans, chat, settings, logs, battery
+│   ├── wifi.py                # NetworkManager nmcli: scan/connect/hotspot
+│   ├── web_ui.py              # Web UI: scans, chat, settings, logs, battery, Wi-Fi
 │   └── __init__.py
 ├── data/
-│   ├── settings.json          # model, prompt, language, Ollama IP/port
+│   ├── settings.json          # model, prompt, language, Ollama, wifi_ap_*
 │   └── database/              # scan sessions (shot.jpg, answer.txt, audio.wav)
-├── tools/                     # test_i2s, test_ups, test_speaker, test_button, ...
+├── tools/                     # test_i2s, test_ups, test_speaker, wifi_fallback, ...
 └── Hardware/                  # 3D models, datasheets
 ```
 
@@ -63,12 +66,14 @@ scanner/
 
 ## Software Stack
 - **Camera**: picamera2 (32 FPS @ 160x120 preview, 640x480 hi-res capture)
-- **Display**: ILI9341 SPI0, RGB565, lgpio; battery icon bottom-right
+- **Display**: ILI9341 SPI0, RGB565, lgpio; **status bar** bottom (lang | IP | WiFi | battery)
 - **LLM**: Ollama vision models
 - **TTS**: Silero (ru=xenia, en=en_0, es=es_1, zh→en); low-battery voice warn ≤15%
 - **I2S**: MAX98357A via `dtoverlay=hifiberry-dac` (card 0). config.txt: `dtparam=audio=off`, `dtoverlay=hifiberry-dac`
 - **UPS**: INA219 I2C 0x41 (`modules/ups.py`, `tools/test_ups.py`)
-- **Web UI**: :8080, battery badge/panel + `/api/battery`, i18n (ru/en/zh/es)
+- **Web UI**: :8080, battery badge/panel + `/api/battery`, Wi-Fi in Settings, i18n (ru/en/zh/es)
+- **WiFi**: `modules/wifi.py` via `sudo -n nmcli`. Scan list in client mode; **AP mode = manual SSID + password** (no scan button). Connect from AP drops AP, rescans, connects (restores AP on fail). Show/hide password button.
+- **WiFi fallback**: `scanner-wifi-fallback.service` — if no known AP → hotspot **Scanner-AP** / `scanner123` (`tools/wifi_fallback.py`)
 - **Audio out**: PulseAudio (paplay), fallback aplay plughw:0,0
 
 ## Installed Ollama Models

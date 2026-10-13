@@ -72,6 +72,14 @@ def get_battery_status():
     return st
 
 
+def get_wifi_status():
+    try:
+        from modules import wifi
+        return wifi.get_status()
+    except Exception as e:
+        return {"error": str(e), "devices": [], "wlan_state": "missing"}
+
+
 def save_settings(data):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -231,6 +239,16 @@ a { color:var(--accent); }
 .batt-panel .status-charging { color:var(--success); }
 .batt-panel .status-idle { color:var(--accent2); }
 .batt-panel .status-error { color:var(--danger); }
+
+/* WiFi */
+.wifi-list { margin:10px 0; }
+.wifi-item { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; margin-bottom:6px; background:var(--bg-input); }
+.wifi-item.active { border-color:var(--accent); }
+.wifi-item .ssid { flex:1; font-size:.9em; }
+.wifi-item .sig { font-size:.8em; color:var(--accent2); min-width:42px; }
+.wifi-item button { font-size:.8em; }
+.wifi-pass { width:100%; background:var(--bg-input); border:1px solid var(--border); color:var(--text-bright); padding:8px; margin:8px 0; font-family:inherit; border-radius:6px; }
+.wifi-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
 </style>
 </head>
 <body>
@@ -297,6 +315,25 @@ a { color:var(--accent); }
     </div>
     <button class="save-btn" onclick="saveSettings()" data-i18n="set_save">Сохранить</button>
   </div>
+
+  <div class="card">
+    <div class="card-title" data-i18n="wifi_title">Wi-Fi</div>
+    <div id="wifi-status" class="card-text" style="margin-bottom:8px">—</div>
+    <button class="save-btn" id="wifi-scan-btn" onclick="scanWifi()" data-i18n="wifi_scan">Сканировать</button>
+    <div class="wifi-list" id="wifi-list"></div>
+    <div id="wifi-manual" style="display:none">
+      <input class="wifi-pass" id="wifi-ssid" type="text" data-i18n-placeholder="wifi_ssid_ph" placeholder="Имя сети (SSID)">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input class="wifi-pass" id="wifi-pass" type="password" data-i18n-placeholder="wifi_pass_ph" placeholder="Пароль выбранной сети" style="flex:1;margin:8px 0">
+      <button type="button" class="play-btn" id="wifi-pass-toggle" onclick="toggleWifiPass()" data-i18n="wifi_show_pass">Показать</button>
+    </div>
+    <div class="wifi-actions">
+      <button class="save-btn" onclick="connectWifi()" data-i18n="wifi_connect">Подключиться</button>
+      <button class="del-btn" onclick="startHotspot()" data-i18n="wifi_hotspot">Точка доступа</button>
+    </div>
+    <div id="wifi-msg" class="card-text" style="margin-top:8px"></div>
+  </div>
 </div>
 
 <!-- Logs -->
@@ -333,6 +370,13 @@ const LANGS = {
     batt_title:'Батарея UPS', batt_na:'Нет данных',
     batt_percent:'Заряд', batt_voltage:'Напряжение', batt_current:'Ток',
     batt_power:'Мощность', batt_range:'Диапазон', batt_charging:'Идёт зарядка', batt_discharging:'Разрядка / работа',
+    wifi_title:'Wi-Fi', wifi_scan:'Сканировать', wifi_connect:'Подключиться',
+    wifi_connected:'Активна', wifi_hotspot:'Точка доступа', wifi_hotspot_off:'Выключить AP',
+    wifi_hotspot_ok:'Точка доступа включена', wifi_pass_ph:'Пароль выбранной сети',
+    wifi_state:'Состояние', wifi_none:'Сети не найдены', wifi_selected:'Выбрана сеть',
+    wifi_select_first:'Сначала выберите сеть', wifi_connecting:'Подключение', wifi_ok:'Подключено',
+    wifi_ssid_ph:'Имя сети (SSID)', wifi_manual_hint:'AP-режим: введите имя сети и пароль вручную.',
+    wifi_show_pass:'Показать', wifi_hide_pass:'Скрыть',
   },
   en: {
     nav_scans:'Scans', nav_chat:'Chat', nav_settings:'Settings', nav_logs:'Logs',
@@ -349,6 +393,13 @@ const LANGS = {
     batt_title:'UPS Battery', batt_na:'No data',
     batt_percent:'Charge', batt_voltage:'Voltage', batt_current:'Current',
     batt_power:'Power', batt_range:'Range', batt_charging:'Charging', batt_discharging:'Discharging / load',
+    wifi_title:'Wi-Fi', wifi_scan:'Scan', wifi_connect:'Connect',
+    wifi_connected:'Active', wifi_hotspot:'Hotspot', wifi_hotspot_off:'Stop AP',
+    wifi_hotspot_ok:'Hotspot enabled', wifi_pass_ph:'Password for selected network',
+    wifi_state:'State', wifi_none:'No networks found', wifi_selected:'Selected',
+    wifi_select_first:'Select a network first', wifi_connecting:'Connecting', wifi_ok:'Connected',
+    wifi_ssid_ph:'Network name (SSID)', wifi_manual_hint:'AP mode: enter SSID and password manually.',
+    wifi_show_pass:'Show', wifi_hide_pass:'Hide',
   },
   zh: {
     nav_scans:'扫描', nav_chat:'聊天', nav_settings:'设置', nav_logs:'日志',
@@ -365,6 +416,13 @@ const LANGS = {
     batt_title:'UPS 电池', batt_na:'无数据',
     batt_percent:'电量', batt_voltage:'电压', batt_current:'电流',
     batt_power:'功率', batt_range:'范围', batt_charging:'充电中', batt_discharging:'放电 / 使用中',
+    wifi_title:'Wi-Fi', wifi_scan:'扫描', wifi_connect:'连接',
+    wifi_connected:'已连接', wifi_hotspot:'热点', wifi_hotspot_off:'关闭热点',
+    wifi_hotspot_ok:'热点已开启', wifi_pass_ph:'所选网络的密码',
+    wifi_state:'状态', wifi_none:'未找到网络', wifi_selected:'已选择',
+    wifi_select_first:'请先选择网络', wifi_connecting:'连接中', wifi_ok:'已连接',
+    wifi_ssid_ph:'网络名称 (SSID)', wifi_manual_hint:'AP 模式：请手动输入 SSID 和密码。',
+    wifi_show_pass:'显示', wifi_hide_pass:'隐藏',
   },
   es: {
     nav_scans:'Escaneos', nav_chat:'Chat', nav_settings:'Ajustes', nav_logs:'Logs',
@@ -381,6 +439,13 @@ const LANGS = {
     batt_title:'Batería UPS', batt_na:'Sin datos',
     batt_percent:'Carga', batt_voltage:'Voltaje', batt_current:'Corriente',
     batt_power:'Potencia', batt_range:'Rango', batt_charging:'Cargando', batt_discharging:'Descarga / uso',
+    wifi_title:'Wi-Fi', wifi_scan:'Escanear', wifi_connect:'Conectar',
+    wifi_connected:'Activa', wifi_hotspot:'Punto de acceso', wifi_hotspot_off:'Apagar AP',
+    wifi_hotspot_ok:'Punto de acceso activado', wifi_pass_ph:'Contraseña de la red seleccionada',
+    wifi_state:'Estado', wifi_none:'Sin redes', wifi_selected:'Seleccionada',
+    wifi_select_first:'Selecciona una red primero', wifi_connecting:'Conectando', wifi_ok:'Conectado',
+    wifi_ssid_ph:'Nombre de red (SSID)', wifi_manual_hint:'Modo AP: introduce SSID y contraseña a mano.',
+    wifi_show_pass:'Mostrar', wifi_hide_pass:'Ocultar',
   },
 };
 
@@ -402,7 +467,102 @@ function showSection(name) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   event.target.classList.add('active');
   if (name==='scans') loadScans();
-  if (name==='settings') loadSettings();
+  if (name==='settings') { loadSettings(); loadWifiStatus(); }
+}
+
+// WiFi
+let selectedWifi = null;
+function loadWifiStatus() {
+  fetch('/api/wifi/status').then(r=>r.json()).then(st => {
+    const el = document.getElementById('wifi-status');
+    if (!el) return;
+    el.textContent = t('wifi_state') + ': ' + (st.wlan_state||'?') +
+      (st.wlan_connection ? ' (' + st.wlan_connection + ')' : '') +
+      (st.hotspot ? ' · ' + t('wifi_hotspot') : '');
+    const scanBtn = document.getElementById('wifi-scan-btn');
+    const manual = document.getElementById('wifi-manual');
+    const list = document.getElementById('wifi-list');
+    if (st.hotspot) {
+      if (scanBtn) scanBtn.style.display = 'none';
+      if (manual) manual.style.display = 'block';
+      if (list) list.innerHTML = '<div class="card-text">' + t('wifi_manual_hint') + '</div>';
+    } else {
+      if (scanBtn) scanBtn.style.display = '';
+      if (manual) manual.style.display = 'none';
+    }
+  }).catch(()=>{});
+}
+
+function scanWifi() {
+  const list = document.getElementById('wifi-list');
+  const manual = document.getElementById('wifi-manual');
+  list.innerHTML = '<div class="card-text">…</div>';
+  fetch('/api/wifi/scan').then(r=>r.json()).then(d => {
+    if (d.ap_mode) {
+      if (manual) manual.style.display = 'block';
+      list.innerHTML = '<div class="card-text">' + t('wifi_manual_hint') + '</div>';
+      loadWifiStatus();
+      return;
+    }
+    if (manual) manual.style.display = 'none';
+    if (!d.ok) { list.innerHTML = '<div class="status-error">' + (d.error||t('error')) + '</div>'; return; }
+    list.innerHTML = (d.networks||[]).map(n => `
+      <div class="wifi-item${n.active?' active':''}" data-ssid="${(n.ssid||'').replace(/"/g,'&quot;')}">
+        <span class="ssid">${n.ssid||'(hidden)'}</span>
+        <span class="sig">${n.signal}%</span>
+        <span class="sig">${n.security?'🔒':'—'}</span>
+        <button class="play-btn" onclick="pickWifi(this)">${n.active?t('wifi_connected'):t('wifi_connect')}</button>
+      </div>`).join('') || '<div class="card-text">' + t('wifi_none') + '</div>';
+    loadWifiStatus();
+  }).catch(e => { list.innerHTML = '<div class="status-error">'+e+'</div>'; });
+}
+
+function pickWifi(btn) {
+  const item = btn.closest('.wifi-item');
+  selectedWifi = item.dataset.ssid;
+  document.querySelectorAll('.wifi-item').forEach(i => i.style.borderColor='');
+  item.style.borderColor = 'var(--accent)';
+  const m = document.getElementById('wifi-ssid');
+  if (m) m.value = selectedWifi;
+  document.getElementById('wifi-msg').textContent = t('wifi_selected') + ': ' + selectedWifi;
+}
+
+function toggleWifiPass() {
+  const input = document.getElementById('wifi-pass');
+  const btn = document.getElementById('wifi-pass-toggle');
+  if (!input || !btn) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.textContent = show ? t('wifi_hide_pass') : t('wifi_show_pass');
+}
+
+function connectWifi() {
+  const manual = document.getElementById('wifi-ssid');
+  const ssid = (manual && manual.value.trim()) || selectedWifi;
+  const password = document.getElementById('wifi-pass').value;
+  if (!ssid) { document.getElementById('wifi-msg').textContent = t('wifi_select_first'); return; }
+  document.getElementById('wifi-msg').textContent = t('wifi_connecting') + '…';
+  fetch('/api/wifi/connect', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ssid, password})}).then(r=>r.json()).then(d => {
+    document.getElementById('wifi-msg').textContent = d.ok ? (d.message||t('wifi_ok')) : (t('error')+': '+(d.error||''));
+    loadWifiStatus();
+    setTimeout(loadWifiStatus, 3000);
+  }).catch(e => { document.getElementById('wifi-msg').textContent = String(e); });
+}
+
+function startHotspot() {
+  fetch('/api/wifi/hotspot', {method:'POST', headers:{'Content-Type':'application/json'}, body: '{}'})
+    .then(r=>r.json()).then(d => {
+      document.getElementById('wifi-msg').textContent = d.ok ? t('wifi_hotspot_ok') : (t('error')+': '+(d.error||''));
+      loadWifiStatus();
+    });
+}
+
+function stopHotspot() {
+  fetch('/api/wifi/hotspot', {method:'DELETE'}).then(r=>r.json()).then(d => {
+    document.getElementById('wifi-msg').textContent = d.ok ? t('wifi_hotspot_off') : (t('error')+': '+(d.error||''));
+    loadWifiStatus();
+  });
 }
 
 // Scans (auto-refresh)
@@ -660,6 +820,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == '/api/battery':
             self._json(get_battery_status())
 
+        elif path == '/api/wifi/status':
+            self._json(get_wifi_status())
+
+        elif path == '/api/wifi/scan':
+            try:
+                from modules import wifi
+                allow_drop = 'ap_drop=1' in self.path or 'force=1' in self.path
+                self._json(wifi.scan_networks(allow_ap_drop=allow_drop))
+            except Exception as e:
+                self._json({"ok": False, "error": str(e), "networks": []})
+
         elif path == '/api/settings':
             self._json(load_settings())
 
@@ -701,7 +872,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = self.path.split('?')[0]
-        if path.startswith('/api/scan/'):
+        if path == '/api/wifi/hotspot':
+            try:
+                from modules import wifi
+                self._json(wifi.stop_hotspot())
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)})
+        elif path.startswith('/api/scan/'):
             scan_id = path.split('/')[3]
             scan_dir = os.path.join(DB_DIR, scan_id)
             if os.path.isdir(scan_dir):
@@ -719,7 +896,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length)) if length else {}
 
-        if path == '/api/chat':
+        if path == '/api/wifi/connect':
+            try:
+                from modules import wifi
+                self._json(wifi.connect(body.get('ssid', ''), body.get('password') or None))
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)})
+
+        elif path == '/api/wifi/hotspot':
+            try:
+                from modules import wifi
+                s = load_settings()
+                ssid = s.get('wifi_ap_ssid') or 'Scanner-AP'
+                pw = s.get('wifi_ap_password') or 'scanner123'
+                self._json(wifi.start_hotspot(ssid, pw))
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)})
+
+        elif path == '/api/chat':
             messages = body.get('messages', [])
             question = messages[-1]['content'] if messages else ""
             image_path = None

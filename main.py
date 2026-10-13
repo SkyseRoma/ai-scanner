@@ -62,6 +62,9 @@ def ensure_ollama():
     print("Ollama: failed to start!")
 
 
+BAR_H = 18
+
+
 def frame_to_rgb565(frame):
     """BGR frame → RGB565 bytes for ILI9341."""
     frame = cv2.resize(frame, (W, H))
@@ -72,26 +75,152 @@ def frame_to_rgb565(frame):
     return ((rgb565 & 0xFF) << 8) | (rgb565 >> 8)
 
 
-def draw_battery_icon(frame, percent, charging=False):
-    """Small battery icon in bottom-right corner of BGR frame."""
+def get_local_ip():
+    # Prefer wlan0/eth0 address even without Internet (AP mode uses 10.42.0.1)
+    try:
+        r = subprocess.run(
+            ["ip", "-4", "-o", "addr", "show", "scope", "global"],
+            capture_output=True, text=True, timeout=2,
+        )
+        best = ""
+        for line in r.stdout.splitlines():
+            # 2: wlan0    inet 10.42.0.1/24 brd ...
+            if "inet " not in line:
+                continue
+            parts = line.split()
+            ip = parts[3].split("/")[0]
+            if "wlan" in line:
+                return ip
+            best = best or ip
+        if best:
+            return best
+    except Exception:
+        pass
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(1)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "?"
+
+
+def get_wifi_signal():
+    """Return (ssid, signal_percent). In AP mode SSID is Scanner-AP / AP."""
+    try:
+        r = subprocess.run(
+            ["nmcli", "-t", "-f", "CONNECTION,TYPE,DEVICE", "device", "status"],
+            capture_output=True, text=True, timeout=4,
+        )
+        for line in r.stdout.splitlines():
+            parts = line.split(":")
+            if len(parts) >= 3 and parts[1] == "wifi":
+                conn = parts[0]
+                if conn in ("Scanner-AP", "scanner-ap"):
+                    return ("AP", 100)
+                if conn and conn != "--":
+                    # try signal from wifi list
+                    r2 = subprocess.run(
+                        ["nmcli", "-t", "-f", "IN-USE,SIGNAL,SSID", "device", "wifi", "list"],
+                        capture_output=True, text=True, timeout=4,
+                    )
+                    for line2 in r2.stdout.splitlines():
+                        p = line2.split(":")
+                        if len(p) >= 3 and p[0] == "*":
+                            sig = int(p[1]) if p[1].isdigit() else 0
+                            ssid = ":".join(p[2:]) or conn
+                            return (ssid[:12], sig)
+                    return (conn[:12], 50)
+        return ("—", 0)
+    except Exception:
+        return ("—", 0)
+
+
+def get_language():
+    try:
+        import json
+        with open("data/settings.json") as f:
+            return (json.load(f).get("language") or "ru").upper()[:3]
+    except Exception:
+        return "RU"
+
+
+def refresh_net_info(cache):
+    now = time.time()
+    if now - cache.get("t", 0) < 3.0:
+        return cache
+    cache["t"] = now
+    cache["ip"] = get_local_ip()
+    cache["wifi"] = get_wifi_signal()
+    cache["lang"] = get_language()
+    return cache
+
+
+def draw_status_bar(frame, net, batt):
+    """Bottom status strip: language | IP | WiFi bars | battery."""
     h, w = frame.shape[:2]
-    iw, ih = 30, 12
-    x0, y0 = w - iw - 6, h - ih - 6
-    outline = (0, 255, 255)  # yellow-ish in BGR
-    cv2.rectangle(frame, (x0, y0), (x0 + iw, y0 + ih), outline, 1)
-    cv2.rectangle(frame, (x0 + iw, y0 + 3), (x0 + iw + 3, y0 + ih - 3), outline, -1)
-    pct = max(0, min(100, int(percent)))
-    if pct >= 50:
-        fill = (0, 255, 0)
-    elif pct >= 20:
-        fill = (0, 255, 255)
-    else:
-        fill = (0, 0, 255)
-    fill_w = int((iw - 4) * pct / 100)
+    y0 = h - BAR_H
+    # bar background
+    cv2.rectangle(frame, (0, y0), (w - 1, h - 1), (40, 20, 10), -1)
+    cv2.line(frame, (0, y0), (w - 1, y0), (80, 60, 40), 1)
+
+    cyan = (255, 255, 0)
+    white = (255, 255, 255)
+    green = (0, 255, 0)
+    yellow = (0, 255, 255)
+    red = (0, 0, 255)
+
+    # language (left)
+    lang = net.get("lang") or "—"
+    cv2.putText(frame, lang, (6, y0 + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.42, cyan, 1, cv2.LINE_AA)
+
+    # IP
+    ip = net.get("ip") or "?"
+    cv2.putText(frame, ip, (42, y0 + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.38, white, 1, cv2.LINE_AA)
+
+    # WiFi signal bars
+    ssid, sig = net.get("wifi") or ("—", 0)
+    bx = w - 120
+    bars = 4
+    filled = 0
+    if sig >= 75:
+        filled = 4
+    elif sig >= 50:
+        filled = 3
+    elif sig >= 25:
+        filled = 2
+    elif sig > 0:
+        filled = 1
+    for i in range(bars):
+        bh = 3 + i * 3
+        x = bx + i * 6
+        color = green if i < filled else (60, 60, 60)
+        if filled and i >= filled:
+            color = (60, 60, 60)
+        cv2.rectangle(frame, (x, y0 + 14 - bh), (x + 4, y0 + 14), color, -1)
+    cv2.putText(frame, f"{ssid}", (bx + 28, y0 + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.32, white, 1, cv2.LINE_AA)
+
+    # battery (right)
+    pct = 0
+    charging = False
+    if batt and batt.get("available"):
+        pct = int(float(batt.get("percent") or 0))
+        charging = bool(batt.get("charging"))
+    iw, ih = 18, 9
+    x0 = w - iw - 28
+    yb = y0 + 5
+    outline = white
+    cv2.rectangle(frame, (x0, yb), (x0 + iw, yb + ih), outline, 1)
+    cv2.rectangle(frame, (x0 + iw, yb + 2), (x0 + iw + 2, yb + ih - 2), outline, -1)
+    fill_c = green if pct >= 50 else yellow if pct >= 20 else red
+    fill_w = int((iw - 3) * max(0, min(100, pct)) / 100)
     if fill_w > 0:
-        cv2.rectangle(frame, (x0 + 2, y0 + 2), (x0 + 2 + fill_w, y0 + ih - 2), fill, -1)
-    if charging:
-        cv2.putText(frame, "+", (x0 - 10, y0 + ih - 1), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
+        cv2.rectangle(frame, (x0 + 1, yb + 1), (x0 + 1 + fill_w, yb + ih - 1), fill_c, -1)
+    label = f"{pct}%" + ("+" if charging else "")
+    cv2.putText(frame, label, (w - 26, y0 + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.35, fill_c, 1, cv2.LINE_AA)
 
 
 def scan_animation(disp, frame_rgb565, stop_event):
@@ -102,14 +231,14 @@ def scan_animation(disp, frame_rgb565, stop_event):
     prev_y = -100
 
     while not stop_event.is_set():
-        for y in list(range(0, H - line_h, step)) + list(range(H - line_h, 0, -step)):
+        for y in list(range(0, H - BAR_H - line_h, step)) + list(range(H - BAR_H - line_h, 0, -step)):
             if stop_event.is_set():
                 break
-            if 0 <= prev_y < H:
-                y0, y1 = max(0, prev_y), min(H, prev_y + line_h)
+            if 0 <= prev_y < H - BAR_H:
+                y0, y1 = max(0, prev_y), min(H - BAR_H, prev_y + line_h)
                 disp._set_window(0, y0, W - 1, y1)
                 disp._send_data(frame_rgb565[y0:y1, :].tobytes())
-            y0, y1 = max(0, y), min(H, y + line_h)
+            y0, y1 = max(0, y), min(H - BAR_H, y + line_h)
             line = np.full((y1 - y0, W), green565, dtype=np.uint16)
             disp._set_window(0, y0, W - 1, y1)
             disp._send_data(line.tobytes())
@@ -185,6 +314,7 @@ def run():
     batt = ups.read_status()
     batt_t = 0.0
     batt_warn_state = {"warned": False, "t": 0.0}
+    net_cache = {"t": 0.0, "ip": "?", "wifi": ("—", 0), "lang": "—"}
 
     cam = Camera(width=160, height=120)
     cam.start()
@@ -220,8 +350,8 @@ def run():
 
             try:
                 frame_disp = cv2.resize(frame, (W, H))
-                if batt and batt.get("available"):
-                    draw_battery_icon(frame_disp, batt.get("percent", 0), batt.get("charging", False))
+                refresh_net_info(net_cache)
+                draw_status_bar(frame_disp, net_cache, batt)
                 frame_raw = frame_to_rgb565(frame_disp)
                 disp._set_window()
                 disp._send_data(frame_raw.tobytes())
